@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#020617"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="shipBody" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7dd3fc"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+  <rect x="20" y="20" width="472" height="472" rx="80" fill="none" stroke="#38bdf8" stroke-opacity="0.35" stroke-width="6"/>
+  <!-- Thruster flame -->
+  <polygon points="224,356 288,356 256,438" fill="#f97316"/>
+  <polygon points="238,356 274,356 256,406" fill="#fde047"/>
+  <!-- Wings -->
+  <polygon points="256,148 408,334 304,300 208,300 104,334" fill="#0369a1"/>
+  <!-- Hull -->
+  <polygon points="256,84 318,348 194,348" fill="url(#shipBody)"/>
+  <!-- Cockpit -->
+  <ellipse cx="256" cy="212" rx="22" ry="44" fill="#e0f2fe"/>
+</svg>

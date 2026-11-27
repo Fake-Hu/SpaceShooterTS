@@ -1,0 +1,19 @@
+{
+  "name": "Chiến Cơ Vũ Trụ 2D",
+  "short_name": "SpaceShooter",
+  "description": "Game bắn phi thuyền Sci-Fi Arcade 2D hỗ trợ PC & Mobile.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -438,17 +438,32 @@ canvas {
   backdrop-filter: blur(5px);
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   align-items: center;
   text-align: center;
-  padding: 52px 18px 18px;
-  gap: 11px;
+  padding: 50px 16px 14px;
+  gap: 10px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
   z-index: 20;
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
   transform: scale(0.96);
   transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1), visibility 0.22s ease;
+}
+
+.overlay::-webkit-scrollbar {
+  display: none;
+}
+
+.overlay > :first-child {
+  margin-top: auto;
+}
+
+.overlay > :last-child {
+  margin-bottom: auto;
 }
 
 .overlay.active {
@@ -1055,14 +1070,29 @@ canvas {
 }
 
 /* ===== Tinh chỉnh cho màn hình Mobile nhỏ ===== */
-@media (max-width: 420px) {
+@media (max-width: 440px), (max-height: 660px) {
   .game-title {
-    font-size: 22px;
+    font-size: 20px;
   }
 
   .overlay {
-    padding: 46px 12px 12px;
-    gap: 8px;
+    padding: 44px 10px 10px;
+    gap: 7px;
+  }
+
+  .difficulty-box {
+    padding: 7px 9px;
+    gap: 5px;
+  }
+
+  .ship-card canvas {
+    width: 32px;
+    height: 40px;
+  }
+
+  .btn-start-main {
+    padding: 10px 16px;
+    font-size: 13px;
   }
 
   .hud {

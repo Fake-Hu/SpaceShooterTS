@@ -79,6 +79,11 @@ export class PhaserBackground {
     this.reset();
   }
 
+  resize(width: number, height: number): void {
+    this.width = width;
+    this.height = height;
+  }
+
   private rand(min: number, max: number): number {
     return min + Math.random() * (max - min);
   }

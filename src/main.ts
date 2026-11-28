@@ -24,16 +24,36 @@ const ui = new GameUI(sound);
 
 let scoreSavedForCurrentRun = false;
 
+const gameMount = document.getElementById("gameMount");
+
+function computeTargetCanvasHeight(): number {
+  const rect = gameMount?.getBoundingClientRect();
+  const w = rect && rect.width > 0 ? rect.width : window.innerWidth;
+  const h = rect && rect.height > 0 ? rect.height : window.innerHeight;
+  if (window.innerWidth <= 767 && h > w && h / w > 680 / GAME_CONFIG.CANVAS_WIDTH) {
+    return Math.min(1280, Math.max(680, Math.round(GAME_CONFIG.CANVAS_WIDTH * (h / w))));
+  }
+  return 680;
+}
+
+GAME_CONFIG.CANVAS_HEIGHT = computeTargetCanvasHeight();
+
 const bootScene = new BootScene();
 const gameScene = new GameScene();
 gameScene.setDependencies({ sound, ui });
 
-new Phaser.Game({
+const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: "gameMount",
   width: GAME_CONFIG.CANVAS_WIDTH,
   height: GAME_CONFIG.CANVAS_HEIGHT,
   backgroundColor: "#030712",
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+    width: GAME_CONFIG.CANVAS_WIDTH,
+    height: GAME_CONFIG.CANVAS_HEIGHT
+  },
   render: {
     antialias: true,
     powerPreference: "high-performance"
@@ -46,6 +66,27 @@ new Phaser.Game({
   },
   scene: [bootScene, gameScene]
 });
+
+let resizeRaf = 0;
+function syncCanvasSize(): void {
+  if (resizeRaf) cancelAnimationFrame(resizeRaf);
+  resizeRaf = requestAnimationFrame(() => {
+    resizeRaf = 0;
+    const nextHeight = computeTargetCanvasHeight();
+    if (nextHeight !== GAME_CONFIG.CANVAS_HEIGHT) {
+      GAME_CONFIG.CANVAS_HEIGHT = nextHeight;
+      game.scale.setGameSize(GAME_CONFIG.CANVAS_WIDTH, nextHeight);
+      gameScene.handleResize(GAME_CONFIG.CANVAS_WIDTH, nextHeight);
+    } else {
+      game.scale.refresh();
+    }
+  });
+}
+
+window.addEventListener("resize", syncCanvasSize);
+if (typeof ResizeObserver !== "undefined" && gameMount) {
+  new ResizeObserver(syncCanvasSize).observe(gameMount);
+}
 
 // ===== Khóa hành vi trang web (chặn chuột phải, kéo thả) =====
 window.addEventListener("contextmenu", (e) => {

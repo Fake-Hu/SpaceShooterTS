@@ -715,8 +715,8 @@ export class GameScene extends Phaser.Scene {
     body.setSize(bossW - 12, bossH - 12);
 
     this.physics.add.overlap(
-      this.playerBullets,
       this.bossSprite,
+      this.playerBullets,
       this.onBulletHitBoss as Phaser.Types.Physics.Arcade.ArcadePhysicsCallback,
       undefined,
       this
@@ -872,12 +872,18 @@ export class GameScene extends Phaser.Scene {
   }
 
   private onBulletHitBoss(
-    bulletObj: Phaser.Types.Physics.Arcade.GameObjectWithBody,
-    bossObj: Phaser.Types.Physics.Arcade.GameObjectWithBody
+    bossObj: Phaser.Types.Physics.Arcade.GameObjectWithBody,
+    bulletObj: Phaser.Types.Physics.Arcade.GameObjectWithBody
   ): void {
-    const bullet = bulletObj as Phaser.Physics.Arcade.Sprite;
     const boss = bossObj as Phaser.Physics.Arcade.Sprite;
-    if (!bullet.active || !boss.active || !this.bossData || this.bossData.state !== "fighting") {
+    const bullet = bulletObj as Phaser.Physics.Arcade.Sprite;
+    if (
+      boss !== this.bossSprite ||
+      !bullet.active ||
+      !boss.active ||
+      !this.bossData ||
+      this.bossData.state !== "fighting"
+    ) {
       return;
     }
 
@@ -1226,5 +1232,21 @@ export class GameScene extends Phaser.Scene {
       difficultyLabel: this.currentDifficulty.label,
       maxHp: this.playerMaxHp
     };
+  }
+
+  handleResize(width: number, height: number): void {
+    if (!this.physics?.world || !this.cameras?.main) return;
+    this.physics.world.setBounds(0, 0, width, height);
+    this.cameras.main.setViewport(0, 0, width, height);
+    this.spaceBg?.resize(width, height);
+    this.lastBadgesSignature = "";
+    if (this.playerSprite) {
+      if (this.gameState === "playing") {
+        this.movePlayerTo(this.playerSprite.x, this.playerSprite.y);
+      } else {
+        this.playerSprite.setPosition(width / 2, height - GAME_CONFIG.PLAYER.HEIGHT / 2 - 28);
+      }
+    }
+    this.updateCanvasOverlays();
   }
 }

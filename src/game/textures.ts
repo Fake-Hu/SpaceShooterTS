@@ -31,11 +31,11 @@ export function generateGameTextures(scene: Phaser.Scene): void {
     for (const lv of [1, 2, 3]) {
       const wingColor = lv === 3 ? "#db2777" : lv === 2 ? "#ca8a04" : ship.wing;
       const bodyColor = lv === 3 ? "#f472b6" : lv === 2 ? "#facc15" : ship.body;
-      createCanvasTexture(scene, shipTextureKey(ship.id, lv), w, h + 16, (ctx) => {
+      createCanvasTexture(scene, shipTextureKey(ship.id, lv), w, h + 22, (ctx) => {
         drawShipShape(ctx, ship, 0, 0, w, h, {
           wing: wingColor,
           body: bodyColor,
-          flameLen: 12
+          flameLen: 16
         });
       });
     }
@@ -64,21 +64,21 @@ export function generateGameTextures(scene: Phaser.Scene): void {
 
   // 3. Địch Basic (bình thường & bị thương)
   const drawBasicEnemy = (key: string, bodyColor: string) => {
-    createCanvasTexture(scene, key, 36, 34, (ctx) => {
-      const cx = 18;
-      const cy = 17;
+    createCanvasTexture(scene, key, 52, 50, (ctx) => {
+      const cx = 26;
+      const cy = 25;
       ctx.fillStyle = bodyColor;
       ctx.beginPath();
-      ctx.moveTo(cx, 34);
-      ctx.lineTo(36, 6);
-      ctx.lineTo(cx, 14);
-      ctx.lineTo(0, 6);
+      ctx.moveTo(cx, 50);
+      ctx.lineTo(52, 9);
+      ctx.lineTo(cx, 20);
+      ctx.lineTo(0, 9);
       ctx.closePath();
       ctx.fill();
 
       ctx.fillStyle = "#fca5a5";
       ctx.beginPath();
-      ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+      ctx.arc(cx, cy, 6, 0, Math.PI * 2);
       ctx.fill();
     });
   };
@@ -87,13 +87,13 @@ export function generateGameTextures(scene: Phaser.Scene): void {
 
   // 4. Địch Zigzag (bình thường & bị thương)
   const drawZigzagEnemy = (key: string, bodyColor: string) => {
-    createCanvasTexture(scene, key, 40, 38, (ctx) => {
-      const cx = 20;
-      const cy = 19;
+    createCanvasTexture(scene, key, 58, 56, (ctx) => {
+      const cx = 29;
+      const cy = 28;
       ctx.fillStyle = bodyColor;
       ctx.beginPath();
-      ctx.moveTo(cx, 38);
-      ctx.lineTo(40, cy);
+      ctx.moveTo(cx, 56);
+      ctx.lineTo(58, cy);
       ctx.lineTo(cx, 0);
       ctx.lineTo(0, cy);
       ctx.closePath();
@@ -101,7 +101,7 @@ export function generateGameTextures(scene: Phaser.Scene): void {
 
       ctx.fillStyle = "#fde047";
       ctx.beginPath();
-      ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+      ctx.arc(cx, cy, 7, 0, Math.PI * 2);
       ctx.fill();
     });
   };
@@ -110,26 +110,26 @@ export function generateGameTextures(scene: Phaser.Scene): void {
 
   // 5. Đạn địch
   const drawEnemyBullet = (key: string, color: string, radius: number) => {
-    const size = radius * 2 + 8;
+    const size = radius * 2 + 10;
     const c = size / 2;
     createCanvasTexture(scene, key, size, size, (ctx) => {
       ctx.save();
       ctx.fillStyle = color;
       ctx.shadowColor = color;
-      ctx.shadowBlur = 5;
+      ctx.shadowBlur = 6;
       ctx.beginPath();
       ctx.arc(c, c, radius, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.fillStyle = "#fff1f2";
       ctx.beginPath();
-      ctx.arc(c, c, Math.max(2, radius * 0.45), 0, Math.PI * 2);
+      ctx.arc(c, c, Math.max(2.5, radius * 0.45), 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     });
   };
-  drawEnemyBullet("ebullet_pink", "#fb7185", 5);
-  drawEnemyBullet("ebullet_orange", "#f97316", 6);
+  drawEnemyBullet("ebullet_pink", "#fb7185", 7);
+  drawEnemyBullet("ebullet_orange", "#f97316", 9);
 
   // 6. Boss (thường, cuồng nộ, nháy trúng đạn)
   const bossW = GAME_CONFIG.BOSS.WIDTH;
@@ -141,34 +141,34 @@ export function generateGameTextures(scene: Phaser.Scene): void {
 
       ctx.fillStyle = outer;
       ctx.beginPath();
-      ctx.moveTo(0, 18);
-      ctx.lineTo(bossW, 18);
-      ctx.lineTo(bossW - 14, bossH - 12);
+      ctx.moveTo(0, 26);
+      ctx.lineTo(bossW, 26);
+      ctx.lineTo(bossW - 20, bossH - 18);
       ctx.lineTo(cx, bossH);
-      ctx.lineTo(14, bossH - 12);
+      ctx.lineTo(20, bossH - 18);
       ctx.closePath();
       ctx.fill();
 
       ctx.fillStyle = inner;
       ctx.beginPath();
-      ctx.moveTo(cx - 26, 6);
-      ctx.lineTo(cx + 26, 6);
-      ctx.lineTo(cx + 34, bossH - 16);
-      ctx.lineTo(cx, bossH - 2);
-      ctx.lineTo(cx - 34, bossH - 16);
+      ctx.moveTo(cx - 38, 9);
+      ctx.lineTo(cx + 38, 9);
+      ctx.lineTo(cx + 50, bossH - 24);
+      ctx.lineTo(cx, bossH - 3);
+      ctx.lineTo(cx - 50, bossH - 24);
       ctx.closePath();
       ctx.fill();
 
       ctx.fillStyle = "#e2e8f0";
-      ctx.fillRect(18, bossH - 20, 8, 16);
-      ctx.fillRect(bossW - 26, bossH - 20, 8, 16);
+      ctx.fillRect(26, bossH - 28, 12, 24);
+      ctx.fillRect(bossW - 38, bossH - 28, 12, 24);
 
       ctx.save();
       ctx.fillStyle = core;
       ctx.shadowColor = core;
-      ctx.shadowBlur = 8;
+      ctx.shadowBlur = 10;
       ctx.beginPath();
-      ctx.arc(cx, cy - 2, 11, 0, Math.PI * 2);
+      ctx.arc(cx, cy - 3, 16, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     });
@@ -178,7 +178,7 @@ export function generateGameTextures(scene: Phaser.Scene): void {
   drawBoss("boss_flash", "#fde047", "#ffffff", "#fde047");
 
   // 7. Power-up (heal, weapon, shield)
-  const pSize = GAME_CONFIG.POWERUP.SIZE + 8;
+  const pSize = GAME_CONFIG.POWERUP.SIZE + 10;
   const drawPowerUp = (key: string, color: string, label: string) => {
     createCanvasTexture(scene, key, pSize, pSize, (ctx) => {
       const c = pSize / 2;
@@ -186,9 +186,9 @@ export function generateGameTextures(scene: Phaser.Scene): void {
       ctx.save();
       ctx.fillStyle = "rgba(15, 23, 42, 0.92)";
       ctx.strokeStyle = color;
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 3;
       ctx.shadowColor = color;
-      ctx.shadowBlur = 5;
+      ctx.shadowBlur = 6;
       ctx.beginPath();
       ctx.arc(c, c, r, 0, Math.PI * 2);
       ctx.fill();
@@ -196,7 +196,7 @@ export function generateGameTextures(scene: Phaser.Scene): void {
 
       ctx.shadowBlur = 0;
       ctx.fillStyle = color;
-      ctx.font = "bold 14px Orbitron, 'Segoe UI', sans-serif";
+      ctx.font = "bold 20px Orbitron, 'Segoe UI', sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(label, c, c + 1);

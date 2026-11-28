@@ -32,6 +32,7 @@ export type AchievementEvent = "run_start" | "kill" | "boss_kill" | "powerup" | 
 
 export class AchievementManager {
   private onUnlock: (achievement: Achievement) => void;
+  private saveTimer: number | null = null;
   unlocked: Record<string, boolean>;
   stats: AchievementStats;
   run: AchievementRunState;
@@ -44,6 +45,7 @@ export class AchievementManager {
       this.load<Partial<AchievementStats>>(ACH_STATS_KEY, {})
     );
     this.run = { score: 0, wave: 1, hit: false, difficulty: "normal" };
+    window.addEventListener("pagehide", () => this.flushSave());
   }
 
   private load<T extends object>(key: string, fallback: T): T {
@@ -57,11 +59,29 @@ export class AchievementManager {
   }
 
   save(): void {
+    if (this.saveTimer !== null) {
+      window.clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
     try {
       localStorage.setItem(ACH_STORAGE_KEY, JSON.stringify(this.unlocked));
       localStorage.setItem(ACH_STATS_KEY, JSON.stringify(this.stats));
     } catch {
       // Bỏ qua nếu trình duyệt chặn localStorage
+    }
+  }
+
+  private scheduleSave(): void {
+    if (this.saveTimer !== null) return;
+    this.saveTimer = window.setTimeout(() => {
+      this.saveTimer = null;
+      this.save();
+    }, 1500);
+  }
+
+  flushSave(): void {
+    if (this.saveTimer !== null) {
+      this.save();
     }
   }
 
@@ -90,16 +110,20 @@ export class AchievementManager {
   }
 
   private evaluate(persist: boolean): void {
-    let changed = persist;
+    let unlockedAny = false;
     for (const a of ACHIEVEMENTS) {
       if (this.unlocked[a.id]) continue;
       if (a.test(this.stats, this.run)) {
         this.unlocked[a.id] = true;
-        changed = true;
+        unlockedAny = true;
         this.onUnlock(a);
       }
     }
-    if (changed) this.save();
+    if (unlockedAny) {
+      this.save();
+    } else if (persist) {
+      this.scheduleSave();
+    }
   }
 
   count(): number {

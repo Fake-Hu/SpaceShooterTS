@@ -1,22 +1,22 @@
 import type { DifficultyConfig, DifficultyId, MusicTrack } from "./types";
 
 export const GAME_CONFIG = {
-  CANVAS_WIDTH: 480,
-  CANVAS_HEIGHT: 680,
+  CANVAS_WIDTH: 720,
+  CANVAS_HEIGHT: 1280,
 
   PLAYER: {
-    WIDTH: 44,
-    HEIGHT: 48,
-    SPEED: 5.2,
+    WIDTH: 64,
+    HEIGHT: 70,
+    SPEED: 7.5,
     MAX_HP: 3,
     SHOOT_COOLDOWN_MS: 180,
     INVINCIBLE_MS: 1200
   },
 
   BULLET: {
-    WIDTH: 5,
-    HEIGHT: 16,
-    SPEED: 9
+    WIDTH: 7,
+    HEIGHT: 22,
+    SPEED: 14
   },
 
   ENEMY: {
@@ -60,19 +60,19 @@ export const GAME_CONFIG = {
 
   BOSS: {
     EVERY_WAVES: 5,
-    WIDTH: 112,
-    HEIGHT: 76,
+    WIDTH: 164,
+    HEIGHT: 112,
     BASE_HP: 36,
     HP_PER_APPEARANCE: 22,
-    SPEED_X: 2.2,
+    SPEED_X: 3.2,
     SHOOT_INTERVAL_MS: 1150,
-    BULLET_SPEED: 4.4,
+    BULLET_SPEED: 6.4,
     SCORE_REWARD: 150
   },
 
   POWERUP: {
-    SIZE: 28,
-    SPEED_Y: 2.1,
+    SIZE: 40,
+    SPEED_Y: 3.2,
     DROP_CHANCE: 0.22,
     WEAPON_DURATION_MS: 10000,
     SHIELD_DURATION_MS: 8000

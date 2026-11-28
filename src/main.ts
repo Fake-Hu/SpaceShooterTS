@@ -26,18 +26,6 @@ let scoreSavedForCurrentRun = false;
 
 const gameMount = document.getElementById("gameMount");
 
-function computeTargetCanvasHeight(): number {
-  const rect = gameMount?.getBoundingClientRect();
-  const w = rect && rect.width > 0 ? rect.width : window.innerWidth;
-  const h = rect && rect.height > 0 ? rect.height : window.innerHeight;
-  if (window.innerWidth <= 767 && h > w && h / w > 680 / GAME_CONFIG.CANVAS_WIDTH) {
-    return Math.min(1280, Math.max(680, Math.round(GAME_CONFIG.CANVAS_WIDTH * (h / w))));
-  }
-  return 680;
-}
-
-GAME_CONFIG.CANVAS_HEIGHT = computeTargetCanvasHeight();
-
 const bootScene = new BootScene();
 const gameScene = new GameScene();
 gameScene.setDependencies({ sound, ui });
@@ -45,8 +33,6 @@ gameScene.setDependencies({ sound, ui });
 const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: "gameMount",
-  width: GAME_CONFIG.CANVAS_WIDTH,
-  height: GAME_CONFIG.CANVAS_HEIGHT,
   backgroundColor: "#030712",
   scale: {
     mode: Phaser.Scale.FIT,
@@ -72,14 +58,7 @@ function syncCanvasSize(): void {
   if (resizeRaf) cancelAnimationFrame(resizeRaf);
   resizeRaf = requestAnimationFrame(() => {
     resizeRaf = 0;
-    const nextHeight = computeTargetCanvasHeight();
-    if (nextHeight !== GAME_CONFIG.CANVAS_HEIGHT) {
-      GAME_CONFIG.CANVAS_HEIGHT = nextHeight;
-      game.scale.setGameSize(GAME_CONFIG.CANVAS_WIDTH, nextHeight);
-      gameScene.handleResize(GAME_CONFIG.CANVAS_WIDTH, nextHeight);
-    } else {
-      game.scale.refresh();
-    }
+    game.scale.refresh();
   });
 }
 

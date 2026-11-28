@@ -372,6 +372,32 @@ export class SoundManager {
     this.playTone("triangle", 320, 140, 0.05, 0.06);
   }
 
+  private explosionBufferSmall: AudioBuffer | null = null;
+  private explosionBufferBig: AudioBuffer | null = null;
+  private explosionBufferCtx: AudioContext | null = null;
+
+  private getExplosionBuffer(ctx: AudioContext, isBig: boolean): AudioBuffer {
+    if (this.explosionBufferCtx !== ctx) {
+      this.explosionBufferCtx = ctx;
+      this.explosionBufferSmall = null;
+      this.explosionBufferBig = null;
+    }
+    const cached = isBig ? this.explosionBufferBig : this.explosionBufferSmall;
+    if (cached) return cached;
+
+    const duration = isBig ? 0.48 : 0.18;
+    const sampleRate = ctx.sampleRate;
+    const frameCount = Math.floor(sampleRate * duration);
+    const buffer = ctx.createBuffer(1, frameCount, sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < frameCount; i++) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / frameCount);
+    }
+    if (isBig) this.explosionBufferBig = buffer;
+    else this.explosionBufferSmall = buffer;
+    return buffer;
+  }
+
   playExplosion(isBig = false): void {
     if (this.muted) return;
     const ctx = this.ensureContext();
@@ -382,16 +408,8 @@ export class SoundManager {
     if (volume <= 0.001) return;
 
     try {
-      const sampleRate = ctx.sampleRate;
-      const frameCount = Math.floor(sampleRate * duration);
-      const buffer = ctx.createBuffer(1, frameCount, sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < frameCount; i++) {
-        data[i] = (Math.random() * 2 - 1) * (1 - i / frameCount);
-      }
-
       const noise = ctx.createBufferSource();
-      noise.buffer = buffer;
+      noise.buffer = this.getExplosionBuffer(ctx, isBig);
 
       const filter = ctx.createBiquadFilter();
       filter.type = "lowpass";

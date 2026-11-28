@@ -49,6 +49,13 @@ interface PowerUpData {
   pulse: number;
 }
 
+interface FloatingTextItem {
+  obj: Phaser.GameObjects.Text;
+  active: boolean;
+  elapsed: number;
+  startY: number;
+}
+
 export interface GameSceneDeps {
   sound: SoundManager;
   ui: GameUI;
@@ -95,6 +102,7 @@ export class GameScene extends Phaser.Scene {
 
   // Pooled Particle Emitter
   private explosionEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
+  private floatingTextPool: FloatingTextItem[] = [];
 
   // Boss state
   private bossSprite: Phaser.Physics.Arcade.Sprite | null = null;
@@ -142,8 +150,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   create(): void {
-    const W = GAME_CONFIG.CANVAS_WIDTH;
-    const H = GAME_CONFIG.CANVAS_HEIGHT;
+    const W = this.scale.width;
+    const H = this.scale.height;
 
     this.spaceBg = new PhaserBackground(this, W, H);
 
@@ -156,41 +164,57 @@ export class GameScene extends Phaser.Scene {
     // Pooled ParticleEmitter duy nhất
     this.explosionEmitter = this.add
       .particles(0, 0, "particle_dot", {
-        speed: { min: 65, max: 230 },
-        scale: { start: 0.75, end: 0 },
+        speed: { min: 95, max: 320 },
+        scale: { start: 1.05, end: 0 },
         alpha: { start: 1, end: 0 },
         lifespan: 420,
         emitting: false
       })
       .setDepth(12);
 
+    // Pooled Floating Text (tránh tạo/hủy Canvas Text & Tween mỗi lần hạ địch/nhặt buff)
+    this.floatingTextPool = [];
+    for (let i = 0; i < 16; i++) {
+      const obj = this.add
+        .text(0, 0, "", {
+          fontFamily: GAME_CANVAS_FONT,
+          fontSize: "18px",
+          fontStyle: "bold",
+          color: "#ffffff"
+        })
+        .setOrigin(0.5)
+        .setDepth(15)
+        .setVisible(false);
+      this.floatingTextPool.push({ obj, active: false, elapsed: 0, startY: 0 });
+    }
+
     // Player
     this.playerSprite = this.physics.add.sprite(
       W / 2,
-      H - GAME_CONFIG.PLAYER.HEIGHT / 2 - 28,
+      H - GAME_CONFIG.PLAYER.HEIGHT / 2 - 40,
       shipTextureKey(this.currentShip.id, 1)
     );
-    this.playerSprite.setOrigin(0.5, 24 / 64);
+    this.playerSprite.setOrigin(0.5, 0.375);
     this.playerSprite.setDepth(5);
     const pBody = this.playerSprite.body as Phaser.Physics.Arcade.Body;
-    pBody.setSize(GAME_CONFIG.PLAYER.WIDTH - 10, GAME_CONFIG.PLAYER.HEIGHT - 10);
-    pBody.setOffset(5, 5);
+    pBody.setSize(GAME_CONFIG.PLAYER.WIDTH - 14, GAME_CONFIG.PLAYER.HEIGHT - 14);
+    pBody.setOffset(7, 7);
     this.playerSprite.setVisible(false);
 
     // Shield graphic (vẽ vòng tròn 1 lần tại local origin 0,0, chỉ di chuyển vị trí)
     const shieldRadius = Math.max(GAME_CONFIG.PLAYER.WIDTH, GAME_CONFIG.PLAYER.HEIGHT) * 0.68;
     this.shieldGraphic = this.add.graphics().setDepth(6).setVisible(false);
     this.shieldGraphic.fillStyle(0x22d3ee, 0.14);
-    this.shieldGraphic.lineStyle(2.5, 0x22d3ee, 1);
+    this.shieldGraphic.lineStyle(3, 0x22d3ee, 1);
     this.shieldGraphic.fillCircle(0, 0, shieldRadius);
     this.shieldGraphic.strokeCircle(0, 0, shieldRadius);
 
     // Persistent Canvas HUD overlays
     this.bossHpGraphics = this.add.graphics().setDepth(20);
     this.bossHpText = this.add
-      .text(W / 2, 56 + 9, "", {
+      .text(W / 2, 96 + 13, "", {
         fontFamily: GAME_CANVAS_FONT,
-        fontSize: "10px",
+        fontSize: "15px",
         fontStyle: "bold",
         color: "#fca5a5"
       })
@@ -200,14 +224,14 @@ export class GameScene extends Phaser.Scene {
 
     this.bossWarningGraphics = this.add.graphics().setDepth(25).setVisible(false);
     this.bossWarningGraphics.fillStyle(0x7f1d1d, 0.86);
-    this.bossWarningGraphics.fillRect(32, H * 0.28, W - 64, 46);
-    this.bossWarningGraphics.lineStyle(2, 0xf87171, 1);
-    this.bossWarningGraphics.strokeRect(32, H * 0.28, W - 64, 46);
+    this.bossWarningGraphics.fillRect(48, H * 0.28, W - 96, 68);
+    this.bossWarningGraphics.lineStyle(2.5, 0xf87171, 1);
+    this.bossWarningGraphics.strokeRect(48, H * 0.28, W - 96, 68);
 
     this.bossWarningText = this.add
-      .text(W / 2, H * 0.28 + 23, "CẢNH BÁO: BOSS SẮP XUẤT HIỆN!", {
+      .text(W / 2, H * 0.28 + 34, "CẢNH BÁO: BOSS SẮP XUẤT HIỆN!", {
         fontFamily: GAME_CANVAS_FONT,
-        fontSize: "14px",
+        fontSize: "21px",
         fontStyle: "bold",
         color: "#fef08a"
       })
@@ -217,9 +241,9 @@ export class GameScene extends Phaser.Scene {
 
     this.powerUpHudGraphics = this.add.graphics().setDepth(20);
     this.weaponBadgeText = this.add
-      .text(17, H - 14, "", {
+      .text(24, H - 20, "", {
         fontFamily: GAME_CANVAS_FONT,
-        fontSize: "10px",
+        fontSize: "15px",
         fontStyle: "bold",
         color: "#facc15"
       })
@@ -228,9 +252,9 @@ export class GameScene extends Phaser.Scene {
       .setVisible(false);
 
     this.shieldBadgeText = this.add
-      .text(17, H - 14, "", {
+      .text(24, H - 20, "", {
         fontFamily: GAME_CANVAS_FONT,
-        fontSize: "10px",
+        fontSize: "15px",
         fontStyle: "bold",
         color: "#22d3ee"
       })
@@ -332,10 +356,10 @@ export class GameScene extends Phaser.Scene {
     this.clearEntities();
     this.spaceBg.reset();
 
-    const W = GAME_CONFIG.CANVAS_WIDTH;
-    const H = GAME_CONFIG.CANVAS_HEIGHT;
+    const W = this.scale.width;
+    const H = this.scale.height;
     this.playerSprite.setTexture(shipTextureKey(this.currentShip.id, 1));
-    this.playerSprite.setPosition(W / 2, H - GAME_CONFIG.PLAYER.HEIGHT / 2 - 28);
+    this.playerSprite.setPosition(W / 2, H - GAME_CONFIG.PLAYER.HEIGHT / 2 - 40);
     this.playerSprite.setVisible(true);
     (this.playerSprite.body as Phaser.Physics.Arcade.Body).enable = true;
 
@@ -444,6 +468,11 @@ export class GameScene extends Phaser.Scene {
     this.weaponBadgeText.setVisible(false);
     this.shieldBadgeText.setVisible(false);
     this.lastBadgesSignature = "";
+
+    for (const item of this.floatingTextPool) {
+      item.active = false;
+      item.obj.setVisible(false);
+    }
   }
 
   // ===== Main Phaser Update Loop =====
@@ -461,6 +490,7 @@ export class GameScene extends Phaser.Scene {
     this.updatePlayer(dtFactor);
     this.updateWavesAndSpawns(dtFactor);
     this.updateBoss(dtFactor);
+    this.updateFloatingTexts(clampedDelta);
     this.cleanupOffscreen();
     this.updateCanvasOverlays();
     this.syncDomHUD(false);
@@ -498,8 +528,8 @@ export class GameScene extends Phaser.Scene {
   private movePlayerTo(x: number, y: number): void {
     const hw = GAME_CONFIG.PLAYER.WIDTH / 2;
     const hh = GAME_CONFIG.PLAYER.HEIGHT / 2;
-    const cx = Phaser.Math.Clamp(x, 8 + hw, GAME_CONFIG.CANVAS_WIDTH - 8 - hw);
-    const cy = Phaser.Math.Clamp(y, 12 + hh, GAME_CONFIG.CANVAS_HEIGHT - 10 - hh);
+    const cx = Phaser.Math.Clamp(x, 12 + hw, this.scale.width - 12 - hw);
+    const cy = Phaser.Math.Clamp(y, 18 + hh, this.scale.height - 16 - hh);
     this.playerSprite.setPosition(cx, cy);
   }
 
@@ -588,12 +618,12 @@ export class GameScene extends Phaser.Scene {
     if (this.weaponLevel === 1) {
       spawn(cx, topY, 0, -speed, "bullet_lv1");
     } else if (this.weaponLevel === 2) {
-      spawn(cx - 11, topY + 4, 0, -speed, "bullet_lv2");
-      spawn(cx + 11, topY + 4, 0, -speed, "bullet_lv2");
+      spawn(cx - 16, topY + 6, 0, -speed, "bullet_lv2");
+      spawn(cx + 16, topY + 6, 0, -speed, "bullet_lv2");
     } else {
       spawn(cx, topY, 0, -speed, "bullet_lv3");
-      spawn(cx - 10, topY + 6, -1.7 * 60, -speed * 0.96, "bullet_lv3");
-      spawn(cx + 10, topY + 6, 1.7 * 60, -speed * 0.96, "bullet_lv3");
+      spawn(cx - 15, topY + 8, -2.5 * 60, -speed * 0.96, "bullet_lv3");
+      spawn(cx + 15, topY + 8, 2.5 * 60, -speed * 0.96, "bullet_lv3");
     }
   }
 
@@ -628,9 +658,9 @@ export class GameScene extends Phaser.Scene {
       data.angle += 0.06 * dtFactor;
       const halfW = enemy.width / 2;
       enemy.x = Phaser.Math.Clamp(
-        data.baseX + Math.sin(data.angle) * 45,
-        8 + halfW,
-        GAME_CONFIG.CANVAS_WIDTH - 8 - halfW
+        data.baseX + Math.sin(data.angle) * 68,
+        12 + halfW,
+        this.scale.width - 12 - halfW
       );
     }
 
@@ -645,13 +675,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnEnemy(type: EnemyType): void {
-    const w = type === "zigzag" ? 40 : 36;
-    const h = type === "zigzag" ? 38 : 34;
-    const x = 16 + w / 2 + Math.random() * (GAME_CONFIG.CANVAS_WIDTH - w - 32);
+    const w = type === "zigzag" ? 58 : 52;
+    const h = type === "zigzag" ? 56 : 50;
+    const x = 20 + w / 2 + Math.random() * (this.scale.width - w - 40);
     const y = -h / 2;
 
-    const waveBonus = Math.min(2.2, (this.wave - 1) * 0.2);
-    const speedY = ((type === "zigzag" ? 2.4 : 2.8) + waveBonus) * this.currentDifficulty.enemySpeedMul;
+    const waveBonus = Math.min(3.2, (this.wave - 1) * 0.28);
+    const speedY = ((type === "zigzag" ? 3.8 : 4.4) + waveBonus) * this.currentDifficulty.enemySpeedMul;
     const baseHp = type === "zigzag" ? 2 : 1;
     const hp = Math.max(1, Math.round(baseHp * this.currentDifficulty.enemyHpMul));
     const baseScore = type === "zigzag" ? 20 : GAME_CONFIG.ENEMY.SCORE_PER_KILL;
@@ -694,7 +724,7 @@ export class GameScene extends Phaser.Scene {
       state: "entering",
       dirX: Math.random() < 0.5 ? -1 : 1,
       speedX: GAME_CONFIG.BOSS.SPEED_X * this.currentDifficulty.enemySpeedMul,
-      targetY: 62 + bossH / 2,
+      targetY: 120 + bossH / 2,
       hoverPhase: 0,
       maxHp,
       hp: maxHp,
@@ -706,8 +736,8 @@ export class GameScene extends Phaser.Scene {
     this.lastBossHpRendered = -1;
 
     this.bossSprite = this.physics.add.sprite(
-      GAME_CONFIG.CANVAS_WIDTH / 2,
-      -bossH / 2 - 10,
+      this.scale.width / 2,
+      -bossH / 2 - 16,
       "boss_normal"
     );
     this.bossSprite.setDepth(4);
@@ -754,16 +784,16 @@ export class GameScene extends Phaser.Scene {
     const halfW = GAME_CONFIG.BOSS.WIDTH / 2;
 
     this.bossSprite.x += b.dirX * b.speedX * speedFactor * dtFactor;
-    if (this.bossSprite.x <= 14 + halfW) {
-      this.bossSprite.x = 14 + halfW;
+    if (this.bossSprite.x <= 20 + halfW) {
+      this.bossSprite.x = 20 + halfW;
       b.dirX = 1;
-    } else if (this.bossSprite.x >= GAME_CONFIG.CANVAS_WIDTH - 14 - halfW) {
-      this.bossSprite.x = GAME_CONFIG.CANVAS_WIDTH - 14 - halfW;
+    } else if (this.bossSprite.x >= this.scale.width - 20 - halfW) {
+      this.bossSprite.x = this.scale.width - 20 - halfW;
       b.dirX = -1;
     }
 
     b.hoverPhase += 0.05 * dtFactor;
-    this.bossSprite.y = b.targetY + Math.sin(b.hoverPhase) * 8;
+    this.bossSprite.y = b.targetY + Math.sin(b.hoverPhase) * 12;
 
     const isFlashing = this.simTime < b.hitFlashUntil;
     const desiredKey = isFlashing ? "boss_flash" : enraged ? "boss_enraged" : "boss_normal";
@@ -802,7 +832,7 @@ export class GameScene extends Phaser.Scene {
 
     if (enraged && b.shotCounter % 2 === 0) {
       for (const a of [-0.46, -0.23, 0, 0.23, 0.46]) {
-        spawnBullet(cx, muzzleY, Math.sin(a) * speed, Math.cos(a) * speed, "ebullet_orange", 6);
+        spawnBullet(cx, muzzleY, Math.sin(a) * speed, Math.cos(a) * speed, "ebullet_orange", 9);
       }
       return;
     }
@@ -822,14 +852,14 @@ export class GameScene extends Phaser.Scene {
           Math.cos(angle) * speed,
           Math.sin(angle) * speed,
           "ebullet_pink",
-          5
+          7
         );
       }
     } else {
-      const leftX = this.bossSprite.x - GAME_CONFIG.BOSS.WIDTH / 2 + 22;
-      const rightX = this.bossSprite.x + GAME_CONFIG.BOSS.WIDTH / 2 - 22;
-      spawnBullet(leftX, muzzleY - 4, 0, speed * 1.05, "ebullet_pink", 5);
-      spawnBullet(rightX, muzzleY - 4, 0, speed * 1.05, "ebullet_pink", 5);
+      const leftX = this.bossSprite.x - GAME_CONFIG.BOSS.WIDTH / 2 + 32;
+      const rightX = this.bossSprite.x + GAME_CONFIG.BOSS.WIDTH / 2 - 32;
+      spawnBullet(leftX, muzzleY - 6, 0, speed * 1.05, "ebullet_pink", 7);
+      spawnBullet(rightX, muzzleY - 6, 0, speed * 1.05, "ebullet_pink", 7);
     }
   }
 
@@ -1026,6 +1056,7 @@ export class GameScene extends Phaser.Scene {
     this.ui.updateSideTelemetry("NGỪNG HOẠT ĐỘNG", "HỎNG", "CHỜ KHỞI HÀNH");
 
     this.updateHighScoreIfNeeded();
+    this.ui.achievements.flushSave();
     this.syncDomHUD(true);
     this.ui.showScreen("gameover", {
       score: this.score,
@@ -1054,7 +1085,7 @@ export class GameScene extends Phaser.Scene {
 
   private spawnPowerUp(x: number, y: number, type: PowerUpType): void {
     const half = GAME_CONFIG.POWERUP.SIZE / 2;
-    const clampedX = Phaser.Math.Clamp(x, 10 + half, GAME_CONFIG.CANVAS_WIDTH - 10 - half);
+    const clampedX = Phaser.Math.Clamp(x, 14 + half, this.scale.width - 14 - half);
     const key = `powerup_${type}`;
     const item = this.powerUps.get(clampedX, y, key) as Phaser.Physics.Arcade.Sprite | null;
     if (!item) return;
@@ -1076,31 +1107,43 @@ export class GameScene extends Phaser.Scene {
   }
 
   private addFloatingText(x: number, y: number, text: string, color = "#ffffff"): void {
-    const txt = this.add
-      .text(x, y, text, {
-        fontFamily: GAME_CANVAS_FONT,
-        fontSize: "12px",
-        fontStyle: "bold",
-        color
-      })
-      .setOrigin(0.5)
-      .setDepth(15);
+    if (this.floatingTextPool.length === 0) return;
+    let slot = this.floatingTextPool.find((item) => !item.active);
+    if (!slot) {
+      slot = this.floatingTextPool.reduce((oldest, cur) =>
+        cur.elapsed > oldest.elapsed ? cur : oldest
+      );
+    }
+    slot.active = true;
+    slot.elapsed = 0;
+    slot.startY = y;
+    slot.obj.setText(text);
+    slot.obj.setColor(color);
+    slot.obj.setPosition(x, y);
+    slot.obj.setAlpha(1);
+    slot.obj.setVisible(true);
+  }
 
-    this.tweens.add({
-      targets: txt,
-      y: y - 42,
-      alpha: 0,
-      duration: 750,
-      ease: "Linear",
-      onComplete: () => txt.destroy()
-    });
+  private updateFloatingTexts(deltaMs: number): void {
+    const duration = 750;
+    for (const item of this.floatingTextPool) {
+      if (!item.active) continue;
+      item.elapsed += deltaMs;
+      const t = item.elapsed / duration;
+      if (t >= 1) {
+        item.active = false;
+        item.obj.setVisible(false);
+      } else {
+        item.obj.y = item.startY - 60 * t;
+        item.obj.alpha = 1 - t;
+      }
+    }
   }
 
   private triggerShake(intensity: number, durationMs: number): void {
     if (this.ui.shakeEnabled) {
       this.cameras.main.shake(durationMs, intensity / 800);
     }
-    this.ui.shake(intensity, durationMs);
   }
 
   private updateHighScoreIfNeeded(): void {
@@ -1111,8 +1154,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private cleanupOffscreen(): void {
-    const W = GAME_CONFIG.CANVAS_WIDTH;
-    const H = GAME_CONFIG.CANVAS_HEIGHT;
+    const W = this.scale.width;
+    const H = this.scale.height;
 
     for (const child of this.playerBullets.getChildren()) {
       const s = child as Phaser.Physics.Arcade.Sprite;
@@ -1141,8 +1184,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateCanvasOverlays(): void {
-    const W = GAME_CONFIG.CANVAS_WIDTH;
-    const H = GAME_CONFIG.CANVAS_HEIGHT;
+    const W = this.scale.width;
+    const H = this.scale.height;
 
     // 1. Thanh máu Boss (chỉ vẽ lại khi HP thay đổi)
     if (this.bossData && this.bossSprite) {
@@ -1150,25 +1193,25 @@ export class GameScene extends Phaser.Scene {
       if (b.hp !== this.lastBossHpRendered) {
         this.lastBossHpRendered = b.hp;
         const enraged = b.hp <= b.maxHp * 0.5;
-        const barW = 300;
-        const barH = 12;
+        const barW = Math.min(440, W * 0.62);
+        const barH = 16;
         const barX = (W - barW) / 2;
-        const barY = 56;
+        const barY = 96;
         const ratio = Math.max(0, b.hp / b.maxHp);
 
         this.bossHpGraphics.clear();
         this.bossHpGraphics.fillStyle(0x020617, 0.85);
-        this.bossHpGraphics.fillRect(barX - 6, barY - 4, barW + 12, barH + 22);
-        this.bossHpGraphics.lineStyle(1, 0xf87171, 0.5);
-        this.bossHpGraphics.strokeRect(barX - 6, barY - 4, barW + 12, barH + 22);
+        this.bossHpGraphics.fillRect(barX - 8, barY - 6, barW + 16, barH + 30);
+        this.bossHpGraphics.lineStyle(1.5, 0xf87171, 0.5);
+        this.bossHpGraphics.strokeRect(barX - 8, barY - 6, barW + 16, barH + 30);
 
         this.bossHpGraphics.fillStyle(0x1e293b, 1);
-        this.bossHpGraphics.fillRect(barX, barY + 11, barW, barH - 4);
+        this.bossHpGraphics.fillRect(barX, barY + 15, barW, barH - 4);
         this.bossHpGraphics.fillStyle(enraged ? 0xef4444 : 0xf97316, 1);
-        this.bossHpGraphics.fillRect(barX, barY + 11, barW * ratio, barH - 4);
+        this.bossHpGraphics.fillRect(barX, barY + 15, barW * ratio, barH - 4);
 
         this.bossHpText.setText(`BOSS ĐỢT ${b.wave} (${b.hp}/${b.maxHp})`);
-        this.bossHpText.setPosition(W / 2, barY + 9);
+        this.bossHpText.setPosition(W / 2, barY + 13);
         this.bossHpText.setVisible(true);
       }
     } else if (this.lastBossHpRendered !== -1) {
@@ -1201,26 +1244,26 @@ export class GameScene extends Phaser.Scene {
       this.weaponBadgeText.setVisible(false);
       this.shieldBadgeText.setVisible(false);
 
-      let y = H - 14;
+      let y = H - 20;
       if (shieldSec > 0) {
-        this.shieldBadgeText.setText(`Khiên: ${shieldSec}s`).setPosition(17, y).setVisible(true);
-        const boxW = this.shieldBadgeText.width + 14;
+        this.shieldBadgeText.setText(`Khiên: ${shieldSec}s`).setPosition(24, y).setVisible(true);
+        const boxW = this.shieldBadgeText.width + 18;
         this.powerUpHudGraphics.fillStyle(0x020617, 0.84);
-        this.powerUpHudGraphics.fillRect(10, y - 15, boxW, 18);
-        this.powerUpHudGraphics.lineStyle(1, 0x22d3ee, 1);
-        this.powerUpHudGraphics.strokeRect(10, y - 15, boxW, 18);
-        y -= 22;
+        this.powerUpHudGraphics.fillRect(15, y - 22, boxW, 26);
+        this.powerUpHudGraphics.lineStyle(1.5, 0x22d3ee, 1);
+        this.powerUpHudGraphics.strokeRect(15, y - 22, boxW, 26);
+        y -= 32;
       }
       if (weaponSec > 0) {
         this.weaponBadgeText
           .setText(`Đạn ${this.weaponLevel} tia: ${weaponSec}s`)
-          .setPosition(17, y)
+          .setPosition(24, y)
           .setVisible(true);
-        const boxW = this.weaponBadgeText.width + 14;
+        const boxW = this.weaponBadgeText.width + 18;
         this.powerUpHudGraphics.fillStyle(0x020617, 0.84);
-        this.powerUpHudGraphics.fillRect(10, y - 15, boxW, 18);
-        this.powerUpHudGraphics.lineStyle(1, 0xfacc15, 1);
-        this.powerUpHudGraphics.strokeRect(10, y - 15, boxW, 18);
+        this.powerUpHudGraphics.fillRect(15, y - 22, boxW, 26);
+        this.powerUpHudGraphics.lineStyle(1.5, 0xfacc15, 1);
+        this.powerUpHudGraphics.strokeRect(15, y - 22, boxW, 26);
       }
     }
   }
@@ -1232,21 +1275,5 @@ export class GameScene extends Phaser.Scene {
       difficultyLabel: this.currentDifficulty.label,
       maxHp: this.playerMaxHp
     };
-  }
-
-  handleResize(width: number, height: number): void {
-    if (!this.physics?.world || !this.cameras?.main) return;
-    this.physics.world.setBounds(0, 0, width, height);
-    this.cameras.main.setViewport(0, 0, width, height);
-    this.spaceBg?.resize(width, height);
-    this.lastBadgesSignature = "";
-    if (this.playerSprite) {
-      if (this.gameState === "playing") {
-        this.movePlayerTo(this.playerSprite.x, this.playerSprite.y);
-      } else {
-        this.playerSprite.setPosition(width / 2, height - GAME_CONFIG.PLAYER.HEIGHT / 2 - 28);
-      }
-    }
-    this.updateCanvasOverlays();
   }
 }

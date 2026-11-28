@@ -54,7 +54,7 @@ export function generateGameTextures(scene: Phaser.Scene): void {
       ctx.save();
       ctx.fillStyle = b.color;
       ctx.shadowColor = b.color;
-      ctx.shadowBlur = 6;
+      ctx.shadowBlur = 5;
       ctx.fillRect(3, 3, bw, bh);
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(4, 5, bw - 2, bh - 4);
@@ -116,7 +116,7 @@ export function generateGameTextures(scene: Phaser.Scene): void {
       ctx.save();
       ctx.fillStyle = color;
       ctx.shadowColor = color;
-      ctx.shadowBlur = 6;
+      ctx.shadowBlur = 5;
       ctx.beginPath();
       ctx.arc(c, c, radius, 0, Math.PI * 2);
       ctx.fill();
@@ -166,7 +166,7 @@ export function generateGameTextures(scene: Phaser.Scene): void {
       ctx.save();
       ctx.fillStyle = core;
       ctx.shadowColor = core;
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = 8;
       ctx.beginPath();
       ctx.arc(cx, cy - 2, 11, 0, Math.PI * 2);
       ctx.fill();
@@ -188,7 +188,7 @@ export function generateGameTextures(scene: Phaser.Scene): void {
       ctx.strokeStyle = color;
       ctx.lineWidth = 2.5;
       ctx.shadowColor = color;
-      ctx.shadowBlur = 6;
+      ctx.shadowBlur = 5;
       ctx.beginPath();
       ctx.arc(c, c, r, 0, Math.PI * 2);
       ctx.fill();
@@ -207,11 +207,132 @@ export function generateGameTextures(scene: Phaser.Scene): void {
   drawPowerUp("powerup_weapon", "#facc15", "W");
   drawPowerUp("powerup_shield", "#22d3ee", "S");
 
-  // 8. Hạt nổ (particle)
+  // 8. Hạt nổ & ngôi sao nền
   createCanvasTexture(scene, "particle_dot", 8, 8, (ctx) => {
     ctx.fillStyle = "#ffffff";
     ctx.beginPath();
     ctx.arc(4, 4, 4, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  createCanvasTexture(scene, "bg_star", 4, 4, (ctx) => {
+    ctx.fillStyle = "#e2e8f0";
+    ctx.fillRect(0, 0, 4, 4);
+  });
+
+  // 9. Texture tinh vân cache sẵn trên GPU (không vẽ gradient mỗi frame)
+  createCanvasTexture(scene, "bg_band_cloud", 220, 220, (ctx) => {
+    const grad = ctx.createRadialGradient(110, 110, 12, 110, 110, 110);
+    grad.addColorStop(0, "rgba(255, 255, 255, 0.85)");
+    grad.addColorStop(0.55, "rgba(255, 255, 255, 0.35)");
+    grad.addColorStop(1, "rgba(255, 255, 255, 0)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 220, 220);
+  });
+
+  const nebulaPalettes: Array<[string, string]> = [
+    ["56, 189, 248", "99, 102, 241"],
+    ["168, 85, 247", "59, 130, 246"],
+    ["20, 184, 166", "129, 140, 248"],
+    ["236, 72, 153", "99, 102, 241"]
+  ];
+  nebulaPalettes.forEach(([c1, c2], idx) => {
+    createCanvasTexture(scene, `bg_nebula_${idx}`, 256, 256, (ctx) => {
+      const grad = ctx.createRadialGradient(128, 128, 10, 128, 128, 128);
+      grad.addColorStop(0, `rgba(${c1}, 1)`);
+      grad.addColorStop(0.5, `rgba(${c2}, 0.55)`);
+      grad.addColorStop(1, "rgba(2, 6, 23, 0)");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 256, 256);
+    });
+  });
+
+  // 10. 6 mẫu hành tinh cache sẵn
+  type PlanetSpec =
+    | { kind: "ringed"; base: string; shade: string; rim: string; ring: string }
+    | { kind: "gas" | "warm"; base: string; shade: string; rim: string; band: string }
+    | { kind: "rocky"; base: string; shade: string; rim: string; crater: string };
+
+  const planetSpecs: PlanetSpec[] = [
+    { kind: "ringed", base: "#38bdf8", shade: "#0c4a6e", rim: "#7dd3fc", ring: "rgba(186, 230, 253, 0.45)" },
+    { kind: "ringed", base: "#f472b6", shade: "#831843", rim: "#fbcfe8", ring: "rgba(251, 207, 232, 0.38)" },
+    { kind: "gas", base: "#c084fc", shade: "#4c1d95", rim: "#e9d5ff", band: "rgba(243, 232, 255, 0.22)" },
+    { kind: "gas", base: "#2dd4bf", shade: "#134e4a", rim: "#99f6e4", band: "rgba(204, 251, 241, 0.2)" },
+    { kind: "rocky", base: "#94a3b8", shade: "#1e293b", rim: "#cbd5e1", crater: "rgba(15, 23, 42, 0.32)" },
+    { kind: "warm", base: "#fb923c", shade: "#7c2d12", rim: "#fed7aa", band: "rgba(254, 215, 170, 0.2)" }
+  ];
+
+  planetSpecs.forEach((style, idx) => {
+    const texSize = 200;
+    const radius = 50;
+    createCanvasTexture(scene, `bg_planet_${idx}`, texSize, texSize, (ctx) => {
+      ctx.save();
+      ctx.translate(texSize / 2, texSize / 2);
+
+      if (style.kind === "ringed") {
+        ctx.strokeStyle = style.ring;
+        ctx.lineWidth = 7;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, radius * 1.85, radius * 0.42, 0, Math.PI, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.clip();
+
+      const sphereGrad = ctx.createRadialGradient(
+        -radius * 0.32,
+        -radius * 0.32,
+        radius * 0.1,
+        0,
+        0,
+        radius * 1.15
+      );
+      sphereGrad.addColorStop(0, style.rim);
+      sphereGrad.addColorStop(0.42, style.base);
+      sphereGrad.addColorStop(1, style.shade);
+      ctx.fillStyle = sphereGrad;
+      ctx.fillRect(-radius, -radius, radius * 2, radius * 2);
+
+      if (style.kind === "gas" || style.kind === "warm") {
+        ctx.fillStyle = style.band;
+        ctx.fillRect(-radius, -radius * 0.42, radius * 2, radius * 0.18);
+        ctx.fillRect(-radius, radius * 0.08, radius * 2, radius * 0.14);
+      } else if (style.kind === "rocky") {
+        ctx.fillStyle = style.crater;
+        ctx.beginPath();
+        ctx.arc(-radius * 0.25, -radius * 0.15, radius * 0.16, 0, Math.PI * 2);
+        ctx.arc(radius * 0.28, radius * 0.22, radius * 0.22, 0, Math.PI * 2);
+        ctx.arc(radius * 0.1, -radius * 0.38, radius * 0.1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+
+      if (style.kind === "ringed") {
+        ctx.strokeStyle = style.ring;
+        ctx.lineWidth = 7;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, radius * 1.85, radius * 0.42, 0, 0, Math.PI);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    });
+  });
+
+  // 11. Vệt sao băng cache sẵn
+  createCanvasTexture(scene, "bg_shooting_star", 96, 6, (ctx) => {
+    const grad = ctx.createLinearGradient(96, 3, 0, 3);
+    grad.addColorStop(0, "rgba(255, 255, 255, 1)");
+    grad.addColorStop(0.35, "rgba(56, 189, 248, 0.65)");
+    grad.addColorStop(1, "rgba(56, 189, 248, 0)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 2, 96, 2);
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(94, 3, 1.5, 0, Math.PI * 2);
     ctx.fill();
   });
 }

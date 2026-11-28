@@ -1,5 +1,4 @@
 import Phaser from "phaser";
-import { SpaceBackground } from "../background";
 import { GAME_CONFIG } from "../config";
 import type { SoundManager } from "../sound";
 import type {
@@ -12,6 +11,7 @@ import type {
 } from "../types";
 import type { GameUI } from "../ui";
 import { SHIP_MODELS } from "../ships";
+import { PhaserBackground } from "./PhaserBackground";
 import { shipTextureKey } from "./textures";
 
 const GAME_CANVAS_FONT = "Orbitron, Rajdhani, 'Segoe UI', sans-serif";
@@ -60,8 +60,7 @@ export class GameScene extends Phaser.Scene {
   private ui!: GameUI;
   private onStateChange?: (state: GameState) => void;
 
-  private spaceBg = new SpaceBackground(GAME_CONFIG.CANVAS_WIDTH, GAME_CONFIG.CANVAS_HEIGHT);
-  private bgTexture: Phaser.Textures.CanvasTexture | null = null;
+  private spaceBg!: PhaserBackground;
 
   private gameState: GameState = "start";
   private simTime = 0;
@@ -76,6 +75,7 @@ export class GameScene extends Phaser.Scene {
   // Player state
   private playerSprite!: Phaser.Physics.Arcade.Sprite;
   private shieldGraphic!: Phaser.GameObjects.Graphics;
+  private shieldWasVisible = false;
   private playerSpeed = GAME_CONFIG.PLAYER.SPEED;
   private playerMaxHp = GAME_CONFIG.PLAYER.MAX_HP;
   private playerHp = GAME_CONFIG.PLAYER.MAX_HP;
@@ -87,11 +87,14 @@ export class GameScene extends Phaser.Scene {
   private lastShotTime = 0;
   private invincibleUntil = 0;
 
-  // Groups
+  // Pooled Groups
   private playerBullets!: Phaser.Physics.Arcade.Group;
   private enemies!: Phaser.Physics.Arcade.Group;
   private enemyBullets!: Phaser.Physics.Arcade.Group;
   private powerUps!: Phaser.Physics.Arcade.Group;
+
+  // Pooled Particle Emitter
+  private explosionEmitter!: Phaser.GameObjects.Particles.ParticleEmitter;
 
   // Boss state
   private bossSprite: Phaser.Physics.Arcade.Sprite | null = null;
@@ -101,13 +104,28 @@ export class GameScene extends Phaser.Scene {
   private bossWarningUntil = 0;
   private lastEnemySpawnTime = 0;
 
-  // HUD overlays inside canvas
+  // Persistent Canvas HUD overlays (zero allocation per frame)
   private bossHpGraphics!: Phaser.GameObjects.Graphics;
   private bossHpText!: Phaser.GameObjects.Text;
+  private lastBossHpRendered = -1;
+
   private bossWarningGraphics!: Phaser.GameObjects.Graphics;
   private bossWarningText!: Phaser.GameObjects.Text;
+  private lastWarningVisible = false;
+
   private powerUpHudGraphics!: Phaser.GameObjects.Graphics;
-  private powerUpHudTexts: Phaser.GameObjects.Text[] = [];
+  private weaponBadgeText!: Phaser.GameObjects.Text;
+  private shieldBadgeText!: Phaser.GameObjects.Text;
+  private lastBadgesSignature = "";
+
+  // DOM HUD dirty-check cache (avoid mutating DOM 60x/s when unchanged)
+  private lastDomScore = -1;
+  private lastDomHighScore = -1;
+  private lastDomWave = -1;
+  private lastDomHp = -1;
+  private lastDomMaxHp = -1;
+  private lastSideWeapon = "";
+  private lastSideShield = "";
 
   // Input state
   private activeActions = new Set<InputAction>();
@@ -127,18 +145,24 @@ export class GameScene extends Phaser.Scene {
     const W = GAME_CONFIG.CANVAS_WIDTH;
     const H = GAME_CONFIG.CANVAS_HEIGHT;
 
-    if (!this.textures.exists("space_bg_canvas")) {
-      this.bgTexture = this.textures.createCanvas("space_bg_canvas", W, H);
-    } else {
-      this.bgTexture = this.textures.get("space_bg_canvas") as Phaser.Textures.CanvasTexture;
-    }
-    this.add.image(W / 2, H / 2, "space_bg_canvas").setDepth(-10);
+    this.spaceBg = new PhaserBackground(this, W, H);
 
-    // Groups
+    // Pooled Arcade Groups
     this.playerBullets = this.physics.add.group();
     this.enemies = this.physics.add.group();
     this.enemyBullets = this.physics.add.group();
     this.powerUps = this.physics.add.group();
+
+    // Pooled ParticleEmitter duy nhất
+    this.explosionEmitter = this.add
+      .particles(0, 0, "particle_dot", {
+        speed: { min: 65, max: 230 },
+        scale: { start: 0.75, end: 0 },
+        alpha: { start: 1, end: 0 },
+        lifespan: 420,
+        emitting: false
+      })
+      .setDepth(12);
 
     // Player
     this.playerSprite = this.physics.add.sprite(
@@ -153,12 +177,18 @@ export class GameScene extends Phaser.Scene {
     pBody.setOffset(5, 5);
     this.playerSprite.setVisible(false);
 
-    this.shieldGraphic = this.add.graphics().setDepth(6);
+    // Shield graphic (vẽ vòng tròn 1 lần tại local origin 0,0, chỉ di chuyển vị trí)
+    const shieldRadius = Math.max(GAME_CONFIG.PLAYER.WIDTH, GAME_CONFIG.PLAYER.HEIGHT) * 0.68;
+    this.shieldGraphic = this.add.graphics().setDepth(6).setVisible(false);
+    this.shieldGraphic.fillStyle(0x22d3ee, 0.14);
+    this.shieldGraphic.lineStyle(2.5, 0x22d3ee, 1);
+    this.shieldGraphic.fillCircle(0, 0, shieldRadius);
+    this.shieldGraphic.strokeCircle(0, 0, shieldRadius);
 
-    // Canvas HUD graphics
+    // Persistent Canvas HUD overlays
     this.bossHpGraphics = this.add.graphics().setDepth(20);
     this.bossHpText = this.add
-      .text(W / 2, 56 + 7, "", {
+      .text(W / 2, 56 + 9, "", {
         fontFamily: GAME_CANVAS_FONT,
         fontSize: "10px",
         fontStyle: "bold",
@@ -168,7 +198,12 @@ export class GameScene extends Phaser.Scene {
       .setDepth(21)
       .setVisible(false);
 
-    this.bossWarningGraphics = this.add.graphics().setDepth(25);
+    this.bossWarningGraphics = this.add.graphics().setDepth(25).setVisible(false);
+    this.bossWarningGraphics.fillStyle(0x7f1d1d, 0.86);
+    this.bossWarningGraphics.fillRect(32, H * 0.28, W - 64, 46);
+    this.bossWarningGraphics.lineStyle(2, 0xf87171, 1);
+    this.bossWarningGraphics.strokeRect(32, H * 0.28, W - 64, 46);
+
     this.bossWarningText = this.add
       .text(W / 2, H * 0.28 + 23, "CẢNH BÁO: BOSS SẮP XUẤT HIỆN!", {
         fontFamily: GAME_CANVAS_FONT,
@@ -181,6 +216,27 @@ export class GameScene extends Phaser.Scene {
       .setVisible(false);
 
     this.powerUpHudGraphics = this.add.graphics().setDepth(20);
+    this.weaponBadgeText = this.add
+      .text(17, H - 14, "", {
+        fontFamily: GAME_CANVAS_FONT,
+        fontSize: "10px",
+        fontStyle: "bold",
+        color: "#facc15"
+      })
+      .setOrigin(0, 1)
+      .setDepth(21)
+      .setVisible(false);
+
+    this.shieldBadgeText = this.add
+      .text(17, H - 14, "", {
+        fontFamily: GAME_CANVAS_FONT,
+        fontSize: "10px",
+        fontStyle: "bold",
+        color: "#22d3ee"
+      })
+      .setOrigin(0, 1)
+      .setDepth(21)
+      .setVisible(false);
 
     // Physics overlaps
     this.physics.add.overlap(
@@ -228,7 +284,7 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.highScore = this.ui.getTopScore();
-    this.ui.updateHUD(0, this.highScore, 1, this.playerMaxHp, this.playerMaxHp);
+    this.syncDomHUD(true);
   }
 
   // ===== Public API cho main.ts / UI =====
@@ -297,11 +353,13 @@ export class GameScene extends Phaser.Scene {
     this.setGameState("playing");
 
     this.ui.achievements.notify("run_start", { difficulty: this.currentDifficulty.id });
-    this.ui.updateHUD(this.score, this.highScore, this.wave, this.playerHp, this.playerMaxHp);
+    this.syncDomHUD(true);
     this.ui.showScreen("playing");
 
     const track = this.soundMgr.startMusic(false);
     this.ui.updateSideTelemetry("LV 1", "CHỜ", track?.title);
+    this.lastSideWeapon = "LV 1";
+    this.lastSideShield = "CHỜ";
     if (track?.title) {
       this.ui.showNowPlaying(track.title, GAME_CONFIG.MUSIC.NOW_PLAYING_DURATION_MS || 3000);
     }
@@ -340,7 +398,10 @@ export class GameScene extends Phaser.Scene {
     this.playerSprite.setVisible(false);
 
     this.highScore = this.ui.getTopScore();
-    this.ui.updateHUD(0, this.highScore, 1, this.playerMaxHp, this.playerMaxHp);
+    this.score = 0;
+    this.wave = 1;
+    this.playerHp = this.playerMaxHp;
+    this.syncDomHUD(true);
     this.ui.showScreen("start");
   }
 
@@ -349,11 +410,18 @@ export class GameScene extends Phaser.Scene {
     this.onStateChange?.(state);
   }
 
+  private disableGroupChildren(group: Phaser.Physics.Arcade.Group): void {
+    for (const child of group.getChildren()) {
+      const s = child as Phaser.Physics.Arcade.Sprite;
+      if (s.active) s.disableBody(true, true);
+    }
+  }
+
   private clearEntities(): void {
-    this.playerBullets.clear(true, true);
-    this.enemies.clear(true, true);
-    this.enemyBullets.clear(true, true);
-    this.powerUps.clear(true, true);
+    this.disableGroupChildren(this.playerBullets);
+    this.disableGroupChildren(this.enemies);
+    this.disableGroupChildren(this.enemyBullets);
+    this.disableGroupChildren(this.powerUps);
 
     if (this.bossSprite) {
       this.bossSprite.destroy();
@@ -361,14 +429,21 @@ export class GameScene extends Phaser.Scene {
     }
     this.bossData = null;
 
-    this.shieldGraphic.clear();
+    this.shieldGraphic.setVisible(false);
+    this.shieldWasVisible = false;
+
     this.bossHpGraphics.clear();
     this.bossHpText.setVisible(false);
-    this.bossWarningGraphics.clear();
+    this.lastBossHpRendered = -1;
+
+    this.bossWarningGraphics.setVisible(false);
     this.bossWarningText.setVisible(false);
+    this.lastWarningVisible = false;
+
     this.powerUpHudGraphics.clear();
-    for (const t of this.powerUpHudTexts) t.destroy();
-    this.powerUpHudTexts = [];
+    this.weaponBadgeText.setVisible(false);
+    this.shieldBadgeText.setVisible(false);
+    this.lastBadgesSignature = "";
   }
 
   // ===== Main Phaser Update Loop =====
@@ -376,13 +451,7 @@ export class GameScene extends Phaser.Scene {
     const clampedDelta = Math.min(50, delta);
     const dtFactor = clampedDelta / 16.67;
 
-    // Vẽ nền vũ trụ
-    if (this.bgTexture) {
-      const ctx = this.bgTexture.getContext();
-      ctx.clearRect(0, 0, GAME_CONFIG.CANVAS_WIDTH, GAME_CONFIG.CANVAS_HEIGHT);
-      this.spaceBg.updateAndDraw(ctx, dtFactor, this.gameState === "playing");
-      this.bgTexture.refresh();
-    }
+    this.spaceBg.update(dtFactor, this.gameState === "playing");
 
     if (this.gameState !== "playing") {
       return;
@@ -393,15 +462,37 @@ export class GameScene extends Phaser.Scene {
     this.updateWavesAndSpawns(dtFactor);
     this.updateBoss(dtFactor);
     this.cleanupOffscreen();
-    this.drawCanvasOverlays();
+    this.updateCanvasOverlays();
+    this.syncDomHUD(false);
+  }
+
+  private syncDomHUD(force: boolean): void {
+    if (
+      force ||
+      this.score !== this.lastDomScore ||
+      this.highScore !== this.lastDomHighScore ||
+      this.wave !== this.lastDomWave ||
+      this.playerHp !== this.lastDomHp ||
+      this.playerMaxHp !== this.lastDomMaxHp
+    ) {
+      this.lastDomScore = this.score;
+      this.lastDomHighScore = this.highScore;
+      this.lastDomWave = this.wave;
+      this.lastDomHp = this.playerHp;
+      this.lastDomMaxHp = this.playerMaxHp;
+      this.ui.updateHUD(this.score, this.highScore, this.wave, this.playerHp, this.playerMaxHp);
+    }
 
     const shieldActive = this.simTime < this.shieldUntil;
     const shieldSec = shieldActive ? Math.ceil((this.shieldUntil - this.simTime) / 1000) : 0;
-    this.ui.updateSideTelemetry(
-      `TIA ${this.weaponLevel}`,
-      shieldActive ? `BẬT (${shieldSec}s)` : "CHỜ"
-    );
-    this.ui.updateHUD(this.score, this.highScore, this.wave, this.playerHp, this.playerMaxHp);
+    const weaponStr = `TIA ${this.weaponLevel}`;
+    const shieldStr = shieldActive ? `BẬT (${shieldSec}s)` : "CHỜ";
+
+    if (force || weaponStr !== this.lastSideWeapon || shieldStr !== this.lastSideShield) {
+      this.lastSideWeapon = weaponStr;
+      this.lastSideShield = shieldStr;
+      this.ui.updateSideTelemetry(weaponStr, shieldStr);
+    }
   }
 
   private movePlayerTo(x: number, y: number): void {
@@ -457,23 +548,24 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // Nhấp nháy khi bất tử
     const isBlinkHidden =
       this.simTime < this.invincibleUntil && Math.floor(this.simTime / 90) % 2 === 0;
     this.playerSprite.setVisible(!isBlinkHidden);
 
-    // Vẽ khiên năng lượng quanh tàu
-    this.shieldGraphic.clear();
-    if (this.simTime < this.shieldUntil && !isBlinkHidden) {
-      const remaining = this.shieldUntil - this.simTime;
-      const shouldDraw = remaining > 2000 || Math.floor(this.simTime / 110) % 2 === 0;
-      if (shouldDraw) {
-        const radius = Math.max(GAME_CONFIG.PLAYER.WIDTH, GAME_CONFIG.PLAYER.HEIGHT) * 0.68;
-        this.shieldGraphic.fillStyle(0x22d3ee, 0.14);
-        this.shieldGraphic.lineStyle(2.5, 0x22d3ee, 1);
-        this.shieldGraphic.fillCircle(this.playerSprite.x, this.playerSprite.y, radius);
-        this.shieldGraphic.strokeCircle(this.playerSprite.x, this.playerSprite.y, radius);
+    const hasShield = this.simTime < this.shieldUntil && !isBlinkHidden;
+    const shieldVisible =
+      hasShield &&
+      (this.shieldUntil - this.simTime > 2000 || Math.floor(this.simTime / 110) % 2 === 0);
+
+    if (shieldVisible) {
+      this.shieldGraphic.setPosition(this.playerSprite.x, this.playerSprite.y);
+      if (!this.shieldWasVisible) {
+        this.shieldGraphic.setVisible(true);
+        this.shieldWasVisible = true;
       }
+    } else if (this.shieldWasVisible) {
+      this.shieldGraphic.setVisible(false);
+      this.shieldWasVisible = false;
     }
   }
 
@@ -483,10 +575,13 @@ export class GameScene extends Phaser.Scene {
     const speed = GAME_CONFIG.BULLET.SPEED * 60;
 
     const spawn = (x: number, y: number, vx: number, vy: number, key: string) => {
-      const bullet = this.playerBullets.create(x, y, key) as Phaser.Physics.Arcade.Sprite;
+      const bullet = this.playerBullets.get(x, y, key) as Phaser.Physics.Arcade.Sprite | null;
+      if (!bullet) return;
+      bullet.setTexture(key);
+      bullet.enableBody(true, x, y, true, true);
       bullet.setDepth(4);
       const body = bullet.body as Phaser.Physics.Arcade.Body;
-      body.setSize(GAME_CONFIG.BULLET.WIDTH, GAME_CONFIG.BULLET.HEIGHT);
+      body.setSize(GAME_CONFIG.BULLET.WIDTH, GAME_CONFIG.BULLET.HEIGHT, true);
       body.setVelocity(vx, vy);
     };
 
@@ -524,9 +619,9 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // Cập nhật chuyển động zigzag cho địch
     for (const child of this.enemies.getChildren()) {
       const enemy = child as Phaser.Physics.Arcade.Sprite;
+      if (!enemy.active) continue;
       const data = enemy.getData("enemy") as EnemyData | undefined;
       if (!data || data.type !== "zigzag") continue;
 
@@ -539,14 +634,13 @@ export class GameScene extends Phaser.Scene {
       );
     }
 
-    // Nhịp thở cho power-up
     for (const child of this.powerUps.getChildren()) {
       const item = child as Phaser.Physics.Arcade.Sprite;
+      if (!item.active) continue;
       const data = item.getData("powerup") as PowerUpData | undefined;
       if (!data) continue;
       data.pulse += 0.1 * dtFactor;
-      const scale = 1 + Math.sin(data.pulse) * 0.08;
-      item.setScale(scale);
+      item.setScale(1 + Math.sin(data.pulse) * 0.08);
     }
   }
 
@@ -563,14 +657,15 @@ export class GameScene extends Phaser.Scene {
     const baseScore = type === "zigzag" ? 20 : GAME_CONFIG.ENEMY.SCORE_PER_KILL;
     const scoreValue = Math.max(5, Math.round(baseScore * this.currentDifficulty.scoreMul));
 
-    const enemy = this.enemies.create(
-      x,
-      y,
-      type === "zigzag" ? "enemy_zigzag" : "enemy_basic"
-    ) as Phaser.Physics.Arcade.Sprite;
+    const texKey = type === "zigzag" ? "enemy_zigzag" : "enemy_basic";
+    const enemy = this.enemies.get(x, y, texKey) as Phaser.Physics.Arcade.Sprite | null;
+    if (!enemy) return;
+
+    enemy.setTexture(texKey);
+    enemy.enableBody(true, x, y, true, true);
     enemy.setDepth(4);
     const body = enemy.body as Phaser.Physics.Arcade.Body;
-    body.setSize(w - 6, h - 6);
+    body.setSize(w - 6, h - 6, true);
     body.setVelocity(0, speedY * 60);
 
     const data: EnemyData = {
@@ -608,6 +703,7 @@ export class GameScene extends Phaser.Scene {
       shotCounter: 0,
       hitFlashUntil: 0
     };
+    this.lastBossHpRendered = -1;
 
     this.bossSprite = this.physics.add.sprite(
       GAME_CONFIG.CANVAS_WIDTH / 2,
@@ -670,9 +766,10 @@ export class GameScene extends Phaser.Scene {
     this.bossSprite.y = b.targetY + Math.sin(b.hoverPhase) * 8;
 
     const isFlashing = this.simTime < b.hitFlashUntil;
-    this.bossSprite.setTexture(
-      isFlashing ? "boss_flash" : enraged ? "boss_enraged" : "boss_normal"
-    );
+    const desiredKey = isFlashing ? "boss_flash" : enraged ? "boss_enraged" : "boss_normal";
+    if (this.bossSprite.texture.key !== desiredKey) {
+      this.bossSprite.setTexture(desiredKey);
+    }
 
     const shootInterval = enraged
       ? GAME_CONFIG.BOSS.SHOOT_INTERVAL_MS * 0.75
@@ -692,7 +789,10 @@ export class GameScene extends Phaser.Scene {
     const speed = GAME_CONFIG.BOSS.BULLET_SPEED * 60;
 
     const spawnBullet = (x: number, y: number, vx: number, vy: number, key: string, r: number) => {
-      const eb = this.enemyBullets.create(x, y, key) as Phaser.Physics.Arcade.Sprite;
+      const eb = this.enemyBullets.get(x, y, key) as Phaser.Physics.Arcade.Sprite | null;
+      if (!eb) return;
+      eb.setTexture(key);
+      eb.enableBody(true, x, y, true, true);
       eb.setDepth(4);
       eb.setData("color", key === "ebullet_orange" ? "#f97316" : "#fb7185");
       const body = eb.body as Phaser.Physics.Arcade.Body;
@@ -745,26 +845,28 @@ export class GameScene extends Phaser.Scene {
     const data = enemy.getData("enemy") as EnemyData | undefined;
     if (!data) return;
 
-    bullet.destroy();
+    const bx = bullet.x;
+    const by = bullet.y;
+    bullet.disableBody(true, true);
     data.hp -= 1;
 
     if (data.hp <= 0) {
       const ex = enemy.x;
       const ey = enemy.y;
-      enemy.destroy();
+      enemy.disableBody(true, true);
 
       this.ui.achievements.notify("kill");
       this.score += data.scoreValue;
       this.updateHighScoreIfNeeded();
 
       const color = data.type === "zigzag" ? "#c084fc" : "#f97316";
-      this.spawnExplosion(ex, ey, color, 14);
+      this.spawnExplosion(ex, ey, color, 12);
       this.soundMgr.playExplosion(false);
       this.addFloatingText(ex, ey - 8, `+${data.scoreValue}`, "#fde047");
       this.maybeDropPowerUp(ex, ey);
     } else {
       enemy.setTexture(data.type === "zigzag" ? "enemy_zigzag_hit" : "enemy_basic_hit");
-      this.spawnExplosion(bullet.x, bullet.y, "#fde047", 5);
+      this.spawnExplosion(bx, by, "#fde047", 4);
       this.soundMgr.playHit();
     }
   }
@@ -779,7 +881,9 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    bullet.destroy();
+    const btx = bullet.x;
+    const bty = bullet.y;
+    bullet.disableBody(true, true);
     this.bossData.hp -= 1;
     this.bossData.hitFlashUntil = this.simTime + 70;
 
@@ -798,8 +902,8 @@ export class GameScene extends Phaser.Scene {
       this.updateHighScoreIfNeeded();
       this.nextBossWave += GAME_CONFIG.BOSS.EVERY_WAVES;
 
-      this.spawnExplosion(bx, by, "#f97316", 36);
-      this.spawnExplosion(bx, by, "#fde047", 24);
+      this.spawnExplosion(bx, by, "#f97316", 28);
+      this.spawnExplosion(bx, by, "#fde047", 18);
       this.soundMgr.playExplosion(true);
       this.addFloatingText(bx, by, `BOSS +${reward}`, "#facc15");
 
@@ -807,7 +911,7 @@ export class GameScene extends Phaser.Scene {
       this.spawnPowerUp(bx + 24, by, Math.random() < 0.5 ? "weapon" : "shield");
       this.soundMgr.setBossMusic(false);
     } else {
-      this.spawnExplosion(bullet.x, bullet.y, "#fde047", 4);
+      this.spawnExplosion(btx, bty, "#fde047", 3);
       this.soundMgr.playHit();
     }
   }
@@ -820,8 +924,8 @@ export class GameScene extends Phaser.Scene {
     if (!enemy.active || this.gameState !== "playing") return;
     const ex = enemy.x;
     const ey = enemy.y;
-    enemy.destroy();
-    this.spawnExplosion(ex, ey, "#ef4444", 16);
+    enemy.disableBody(true, true);
+    this.spawnExplosion(ex, ey, "#ef4444", 12);
     this.handlePlayerHit();
   }
 
@@ -834,8 +938,8 @@ export class GameScene extends Phaser.Scene {
     const color = (eb.getData("color") as string) || "#fb7185";
     const bx = eb.x;
     const by = eb.y;
-    eb.destroy();
-    this.spawnExplosion(bx, by, color, 8);
+    eb.disableBody(true, true);
+    this.spawnExplosion(bx, by, color, 6);
     this.handlePlayerHit();
   }
 
@@ -855,7 +959,7 @@ export class GameScene extends Phaser.Scene {
 
     const ix = item.x;
     const iy = item.y;
-    item.destroy();
+    item.disableBody(true, true);
 
     this.soundMgr.playPowerUp(data.type);
     this.ui.achievements.notify("powerup");
@@ -884,7 +988,7 @@ export class GameScene extends Phaser.Scene {
       this.ui.achievements.notify("shield_block");
       this.triggerShake(3, 160);
       this.soundMgr.playPlayerHit();
-      this.spawnExplosion(this.playerSprite.x, this.playerSprite.y, "#22d3ee", 18);
+      this.spawnExplosion(this.playerSprite.x, this.playerSprite.y, "#22d3ee", 14);
       this.addFloatingText(this.playerSprite.x, this.playerSprite.y - 30, "CHẮN ĐÒN!", "#22d3ee");
       return;
     }
@@ -897,7 +1001,7 @@ export class GameScene extends Phaser.Scene {
     if (this.playerHp <= 0) {
       this.soundMgr.playExplosion(true);
       this.soundMgr.playGameOver();
-      this.spawnExplosion(this.playerSprite.x, this.playerSprite.y, "#38bdf8", 28);
+      this.spawnExplosion(this.playerSprite.x, this.playerSprite.y, "#38bdf8", 22);
       this.triggerGameOver();
     } else {
       this.soundMgr.playPlayerHit();
@@ -909,13 +1013,14 @@ export class GameScene extends Phaser.Scene {
     this.setGameState("gameover");
     this.clearInputs();
     this.playerSprite.setVisible(false);
-    this.shieldGraphic.clear();
+    this.shieldGraphic.setVisible(false);
+    this.shieldWasVisible = false;
     this.soundMgr.stopMusic();
     this.ui.hideNowPlaying();
     this.ui.updateSideTelemetry("NGỪNG HOẠT ĐỘNG", "HỎNG", "CHỜ KHỞI HÀNH");
 
     this.updateHighScoreIfNeeded();
-    this.ui.updateHUD(this.score, this.highScore, this.wave, 0, this.playerMaxHp);
+    this.syncDomHUD(true);
     this.ui.showScreen("gameover", {
       score: this.score,
       wave: this.wave,
@@ -944,27 +1049,24 @@ export class GameScene extends Phaser.Scene {
   private spawnPowerUp(x: number, y: number, type: PowerUpType): void {
     const half = GAME_CONFIG.POWERUP.SIZE / 2;
     const clampedX = Phaser.Math.Clamp(x, 10 + half, GAME_CONFIG.CANVAS_WIDTH - 10 - half);
-    const item = this.powerUps.create(clampedX, y, `powerup_${type}`) as Phaser.Physics.Arcade.Sprite;
+    const key = `powerup_${type}`;
+    const item = this.powerUps.get(clampedX, y, key) as Phaser.Physics.Arcade.Sprite | null;
+    if (!item) return;
+
+    item.setTexture(key);
+    item.setScale(1);
+    item.enableBody(true, clampedX, y, true, true);
     item.setDepth(4);
     const body = item.body as Phaser.Physics.Arcade.Body;
-    body.setSize(GAME_CONFIG.POWERUP.SIZE, GAME_CONFIG.POWERUP.SIZE);
+    body.setSize(GAME_CONFIG.POWERUP.SIZE, GAME_CONFIG.POWERUP.SIZE, true);
     body.setVelocity(0, GAME_CONFIG.POWERUP.SPEED_Y * 60);
     item.setData("powerup", { type, pulse: 0 } satisfies PowerUpData);
   }
 
   private spawnExplosion(x: number, y: number, colorHex: string, count = 12): void {
     const colorNum = parseInt(colorHex.replace("#", ""), 16);
-    const emitter = this.add.particles(x, y, "particle_dot", {
-      speed: { min: 65, max: 230 },
-      scale: { start: 0.75, end: 0 },
-      alpha: { start: 1, end: 0 },
-      lifespan: 420,
-      tint: colorNum,
-      emitting: false
-    });
-    emitter.setDepth(12);
-    emitter.explode(count);
-    this.time.delayedCall(480, () => emitter.destroy());
+    this.explosionEmitter.setParticleTint(colorNum);
+    this.explosionEmitter.explode(count, x, y);
   }
 
   private addFloatingText(x: number, y: number, text: string, color = "#ffffff"): void {
@@ -1006,116 +1108,117 @@ export class GameScene extends Phaser.Scene {
     const W = GAME_CONFIG.CANVAS_WIDTH;
     const H = GAME_CONFIG.CANVAS_HEIGHT;
 
-    for (const child of [...this.playerBullets.getChildren()]) {
+    for (const child of this.playerBullets.getChildren()) {
       const s = child as Phaser.Physics.Arcade.Sprite;
-      if (s.y < -20 || s.y > H + 20 || s.x < -20 || s.x > W + 20) s.destroy();
+      if (s.active && (s.y < -20 || s.y > H + 20 || s.x < -20 || s.x > W + 20)) {
+        s.disableBody(true, true);
+      }
     }
-    for (const child of [...this.enemies.getChildren()]) {
+    for (const child of this.enemies.getChildren()) {
       const s = child as Phaser.Physics.Arcade.Sprite;
-      if (s.y > H + 40) s.destroy();
+      if (s.active && s.y > H + 40) {
+        s.disableBody(true, true);
+      }
     }
-    for (const child of [...this.enemyBullets.getChildren()]) {
+    for (const child of this.enemyBullets.getChildren()) {
       const s = child as Phaser.Physics.Arcade.Sprite;
-      if (s.y > H + 24 || s.y < -24 || s.x < -24 || s.x > W + 24) s.destroy();
+      if (s.active && (s.y > H + 24 || s.y < -24 || s.x < -24 || s.x > W + 24)) {
+        s.disableBody(true, true);
+      }
     }
-    for (const child of [...this.powerUps.getChildren()]) {
+    for (const child of this.powerUps.getChildren()) {
       const s = child as Phaser.Physics.Arcade.Sprite;
-      if (s.y > H + 30) s.destroy();
+      if (s.active && s.y > H + 30) {
+        s.disableBody(true, true);
+      }
     }
   }
 
-  private drawCanvasOverlays(): void {
+  private updateCanvasOverlays(): void {
     const W = GAME_CONFIG.CANVAS_WIDTH;
     const H = GAME_CONFIG.CANVAS_HEIGHT;
 
-    // 1. Thanh máu Boss
-    this.bossHpGraphics.clear();
+    // 1. Thanh máu Boss (chỉ vẽ lại khi HP thay đổi)
     if (this.bossData && this.bossSprite) {
       const b = this.bossData;
-      const enraged = b.hp <= b.maxHp * 0.5;
-      const barW = 300;
-      const barH = 12;
-      const barX = (W - barW) / 2;
-      const barY = 56;
-      const ratio = Math.max(0, b.hp / b.maxHp);
+      if (b.hp !== this.lastBossHpRendered) {
+        this.lastBossHpRendered = b.hp;
+        const enraged = b.hp <= b.maxHp * 0.5;
+        const barW = 300;
+        const barH = 12;
+        const barX = (W - barW) / 2;
+        const barY = 56;
+        const ratio = Math.max(0, b.hp / b.maxHp);
 
-      this.bossHpGraphics.fillStyle(0x020617, 0.85);
-      this.bossHpGraphics.fillRect(barX - 6, barY - 4, barW + 12, barH + 22);
-      this.bossHpGraphics.lineStyle(1, 0xf87171, 0.5);
-      this.bossHpGraphics.strokeRect(barX - 6, barY - 4, barW + 12, barH + 22);
+        this.bossHpGraphics.clear();
+        this.bossHpGraphics.fillStyle(0x020617, 0.85);
+        this.bossHpGraphics.fillRect(barX - 6, barY - 4, barW + 12, barH + 22);
+        this.bossHpGraphics.lineStyle(1, 0xf87171, 0.5);
+        this.bossHpGraphics.strokeRect(barX - 6, barY - 4, barW + 12, barH + 22);
 
-      this.bossHpGraphics.fillStyle(0x1e293b, 1);
-      this.bossHpGraphics.fillRect(barX, barY + 11, barW, barH - 4);
-      this.bossHpGraphics.fillStyle(enraged ? 0xef4444 : 0xf97316, 1);
-      this.bossHpGraphics.fillRect(barX, barY + 11, barW * ratio, barH - 4);
+        this.bossHpGraphics.fillStyle(0x1e293b, 1);
+        this.bossHpGraphics.fillRect(barX, barY + 11, barW, barH - 4);
+        this.bossHpGraphics.fillStyle(enraged ? 0xef4444 : 0xf97316, 1);
+        this.bossHpGraphics.fillRect(barX, barY + 11, barW * ratio, barH - 4);
 
-      this.bossHpText.setText(`BOSS ĐỢT ${b.wave} (${b.hp}/${b.maxHp})`);
-      this.bossHpText.setPosition(W / 2, barY + 9);
-      this.bossHpText.setVisible(true);
-    } else {
+        this.bossHpText.setText(`BOSS ĐỢT ${b.wave} (${b.hp}/${b.maxHp})`);
+        this.bossHpText.setPosition(W / 2, barY + 9);
+        this.bossHpText.setVisible(true);
+      }
+    } else if (this.lastBossHpRendered !== -1) {
+      this.bossHpGraphics.clear();
       this.bossHpText.setVisible(false);
+      this.lastBossHpRendered = -1;
     }
 
-    // 2. Cảnh báo Boss
-    this.bossWarningGraphics.clear();
-    if (this.simTime < this.bossWarningUntil && Math.floor(this.simTime / 180) % 2 !== 0) {
-      this.bossWarningGraphics.fillStyle(0x7f1d1d, 0.86);
-      this.bossWarningGraphics.fillRect(32, H * 0.28, W - 64, 46);
-      this.bossWarningGraphics.lineStyle(2, 0xf87171, 1);
-      this.bossWarningGraphics.strokeRect(32, H * 0.28, W - 64, 46);
-      this.bossWarningText.setVisible(true);
-    } else {
-      this.bossWarningText.setVisible(false);
+    // 2. Cảnh báo Boss (chỉ toggle visibility khi trạng thái nhấp nháy đổi)
+    const warningVisible =
+      this.simTime < this.bossWarningUntil && Math.floor(this.simTime / 180) % 2 !== 0;
+    if (warningVisible !== this.lastWarningVisible) {
+      this.lastWarningVisible = warningVisible;
+      this.bossWarningGraphics.setVisible(warningVisible);
+      this.bossWarningText.setVisible(warningVisible);
     }
 
-    // 3. Chỉ báo Power-up đang bật
-    this.powerUpHudGraphics.clear();
-    for (const t of this.powerUpHudTexts) t.destroy();
-    this.powerUpHudTexts = [];
+    // 3. Chỉ báo Power-up (chỉ cập nhật khi số giây còn lại thay đổi — ~1 lần/giây)
+    const weaponSec =
+      this.weaponLevel > 1 && this.simTime < this.weaponBoostUntil
+        ? Math.ceil((this.weaponBoostUntil - this.simTime) / 1000)
+        : 0;
+    const shieldSec =
+      this.simTime < this.shieldUntil ? Math.ceil((this.shieldUntil - this.simTime) / 1000) : 0;
+    const signature = `${weaponSec > 0 ? `${this.weaponLevel}:${weaponSec}` : ""}|${shieldSec}`;
 
-    const badges: Array<{ text: string; colorStr: string; colorNum: number }> = [];
-    if (this.weaponLevel > 1 && this.simTime < this.weaponBoostUntil) {
-      const sec = Math.ceil((this.weaponBoostUntil - this.simTime) / 1000);
-      badges.push({
-        text: `Đạn ${this.weaponLevel} tia: ${sec}s`,
-        colorStr: "#facc15",
-        colorNum: 0xfacc15
-      });
-    }
-    if (this.simTime < this.shieldUntil) {
-      const sec = Math.ceil((this.shieldUntil - this.simTime) / 1000);
-      badges.push({
-        text: `Khiên: ${sec}s`,
-        colorStr: "#22d3ee",
-        colorNum: 0x22d3ee
-      });
-    }
+    if (signature !== this.lastBadgesSignature) {
+      this.lastBadgesSignature = signature;
+      this.powerUpHudGraphics.clear();
+      this.weaponBadgeText.setVisible(false);
+      this.shieldBadgeText.setVisible(false);
 
-    let y = H - 14;
-    for (let i = badges.length - 1; i >= 0; i--) {
-      const badge = badges[i];
-      const txt = this.add
-        .text(17, y, badge.text, {
-          fontFamily: GAME_CANVAS_FONT,
-          fontSize: "10px",
-          fontStyle: "bold",
-          color: badge.colorStr
-        })
-        .setOrigin(0, 1)
-        .setDepth(21);
-
-      const boxW = txt.width + 14;
-      this.powerUpHudGraphics.fillStyle(0x020617, 0.84);
-      this.powerUpHudGraphics.fillRect(10, y - 15, boxW, 18);
-      this.powerUpHudGraphics.lineStyle(1, badge.colorNum, 1);
-      this.powerUpHudGraphics.strokeRect(10, y - 15, boxW, 18);
-
-      this.powerUpHudTexts.push(txt);
-      y -= 22;
+      let y = H - 14;
+      if (shieldSec > 0) {
+        this.shieldBadgeText.setText(`Khiên: ${shieldSec}s`).setPosition(17, y).setVisible(true);
+        const boxW = this.shieldBadgeText.width + 14;
+        this.powerUpHudGraphics.fillStyle(0x020617, 0.84);
+        this.powerUpHudGraphics.fillRect(10, y - 15, boxW, 18);
+        this.powerUpHudGraphics.lineStyle(1, 0x22d3ee, 1);
+        this.powerUpHudGraphics.strokeRect(10, y - 15, boxW, 18);
+        y -= 22;
+      }
+      if (weaponSec > 0) {
+        this.weaponBadgeText
+          .setText(`Đạn ${this.weaponLevel} tia: ${weaponSec}s`)
+          .setPosition(17, y)
+          .setVisible(true);
+        const boxW = this.weaponBadgeText.width + 14;
+        this.powerUpHudGraphics.fillStyle(0x020617, 0.84);
+        this.powerUpHudGraphics.fillRect(10, y - 15, boxW, 18);
+        this.powerUpHudGraphics.lineStyle(1, 0xfacc15, 1);
+        this.powerUpHudGraphics.strokeRect(10, y - 15, boxW, 18);
+      }
     }
   }
 
-  // Cho phép main.ts lấy thông tin lưu bảng xếp hạng sau Game Over
   getRunSummary(): { score: number; wave: number; difficultyLabel: string; maxHp: number } {
     return {
       score: this.score,

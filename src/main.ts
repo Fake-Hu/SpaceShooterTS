@@ -6,7 +6,6 @@ import { GameScene, type InputAction } from "./game/GameScene";
 import { SoundManager } from "./sound";
 import { GameUI } from "./ui";
 
-const canvas = document.getElementById("gameCanvas") as HTMLCanvasElement;
 const pauseMenuBtn = document.getElementById("pauseMenuBtn") as HTMLButtonElement;
 const fullscreenBtn = document.getElementById("fullscreenBtn") as HTMLButtonElement | null;
 const openSettingsBtn = document.getElementById("openSettingsBtn") as HTMLButtonElement;
@@ -30,11 +29,15 @@ const gameScene = new GameScene();
 gameScene.setDependencies({ sound, ui });
 
 new Phaser.Game({
-  type: Phaser.CANVAS,
-  canvas,
+  type: Phaser.AUTO,
+  parent: "gameMount",
   width: GAME_CONFIG.CANVAS_WIDTH,
   height: GAME_CONFIG.CANVAS_HEIGHT,
   backgroundColor: "#030712",
+  render: {
+    antialias: true,
+    powerPreference: "high-performance"
+  },
   physics: {
     default: "arcade",
     arcade: {
